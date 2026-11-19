@@ -2,12 +2,12 @@
 import PackageDescription
 
 let package = Package(
-    name: "LidAwake",
+    name: "AwakeMac",
     platforms: [.macOS(.v13)],
     targets: [
         .executableTarget(
-            name: "LidAwake",
-            path: "Sources/LidAwake",
+            name: "AwakeMac",
+            path: "Sources/AwakeMac",
             linkerSettings: [
                 .linkedFramework("IOKit"),
                 .linkedFramework("ServiceManagement"),

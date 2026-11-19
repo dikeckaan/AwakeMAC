@@ -12,9 +12,9 @@ enum AwakeMode: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .off: return "Kapalı"
-        case .light: return "Hafif"
-        case .lid: return "Kapak kapalı"
+        case .off: return L("mode.off")
+        case .light: return L("mode.light")
+        case .lid: return L("mode.lid")
         }
     }
 
@@ -36,9 +36,9 @@ enum AwakeMode: String, CaseIterable, Identifiable {
 
     var help: String {
         switch self {
-        case .off: return "Mac normal enerji ayarlarına göre uyur."
-        case .light: return "Boşta uykuyu engeller, ekran kapanabilir. Kapak kapanırsa Mac uyur."
-        case .lid: return "Kapak kapalıyken bile uyumaz (pmset disablesleep 1). Ekran kapanabilir."
+        case .off: return L("mode.off.help")
+        case .light: return L("mode.light.help")
+        case .lid: return L("mode.lid.help")
         }
     }
 
@@ -58,10 +58,8 @@ enum AwakeDuration: Int, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .m30: return "30 dk"
-        case .h1: return "1 sa"
-        case .h2: return "2 sa"
-        case .forever: return "Süresiz"
+        case .forever: return L("duration.forever")
+        default: return shortDuration(rawValue)
         }
     }
 }
@@ -80,6 +78,9 @@ final class AwakeController: ObservableObject {
         static let threshold = "batteryThreshold"
         static let lidActive = "lidModeActive" // crash-recovery marker
         static let loginConfigured = "loginItemConfigured"
+        static let remember = "rememberMode"
+        static let savedMode = "savedMode"
+        static let savedEnd = "savedEnd" // seconds since 1970, 0 = no time limit
     }
 
     static let thresholdChoices = [0, 10, 15, 20, 30, 40]
@@ -101,6 +102,14 @@ final class AwakeController: ObservableObject {
         }
     }
 
+    /// When on, the selected mode survives app restarts, logouts and reboots.
+    @Published var rememberMode: Bool {
+        didSet {
+            UserDefaults.standard.set(rememberMode, forKey: Keys.remember)
+            persistSelection()
+        }
+    }
+
     @Published var batteryThreshold: Int {
         didSet {
             UserDefaults.standard.set(batteryThreshold, forKey: Keys.threshold)
@@ -119,6 +128,7 @@ final class AwakeController: ObservableObject {
         defaults.register(defaults: [Keys.duration: AwakeDuration.forever.rawValue, Keys.threshold: 20])
         duration = AwakeDuration(rawValue: defaults.integer(forKey: Keys.duration)) ?? .forever
         batteryThreshold = defaults.integer(forKey: Keys.threshold)
+        rememberMode = defaults.bool(forKey: Keys.remember)
     }
 
     // MARK: - Lifecycle
@@ -131,7 +141,7 @@ final class AwakeController: ObservableObject {
         // undo it now so the Mac does not stay sleepless forever.
         if defaults.bool(forKey: Keys.lidActive) {
             if SleepControl.setSleepDisabled(false) {
-                notice = Notice(text: "Önceki oturumdan kalan 'uyku kapalı' ayarı geri alındı.", isWarning: false)
+                notice = Notice(text: L("notice.recovered"), isWarning: false)
             }
             defaults.set(false, forKey: Keys.lidActive)
         }
@@ -142,10 +152,8 @@ final class AwakeController: ObservableObject {
         }
 
         refreshSystemState()
+        restoreRememberedMode()
 
-        pollTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.poll() }
-        }
         NotificationCenter.default.addObserver(
             forName: ProcessInfo.thermalStateDidChangeNotification, object: nil, queue: .main
         ) { [weak self] _ in
@@ -186,7 +194,7 @@ final class AwakeController: ObservableObject {
         if newMode == .lid && !helperInstalled {
             refreshSystemState()
             if !helperInstalled {
-                notice = Notice(text: "Kapak kapalı modu için önce tek seferlik kurulumu yap.", isWarning: true)
+                notice = Notice(text: L("notice.setupFirst"), isWarning: true)
                 return
             }
         }
@@ -200,7 +208,7 @@ final class AwakeController: ObservableObject {
         switch newMode {
         case .light:
             guard createAssertion() else {
-                notice = Notice(text: "Uyku engellenemedi (IOPMAssertion).", isWarning: true)
+                notice = Notice(text: L("notice.assertionFailed"), isWarning: true)
                 return
             }
         case .lid:
@@ -208,7 +216,7 @@ final class AwakeController: ObservableObject {
             guard SleepControl.setSleepDisabled(true) else {
                 defaults.set(false, forKey: Keys.lidActive)
                 refreshSystemState()
-                notice = Notice(text: "pmset çalıştırılamadı. Kurulumu yenilemeyi dene.", isWarning: true)
+                notice = Notice(text: L("notice.pmsetFailed"), isWarning: true)
                 return
             }
             _ = createAssertion() // also keep idle-sleep off; harmless and helps on AC
@@ -218,12 +226,15 @@ final class AwakeController: ObservableObject {
 
         mode = newMode
         scheduleExpiry()
+        startPolling()
         sleepDisabledInSystem = SleepControl.isSleepDisabled()
     }
 
     private func deactivate(reason: String?) {
         teardown()
+        stopPolling()
         mode = .off
+        persistSelection()
         sleepDisabledInSystem = SleepControl.isSleepDisabled()
         if let reason {
             notice = Notice(text: reason, isWarning: true)
@@ -240,19 +251,20 @@ final class AwakeController: ObservableObject {
             if SleepControl.setSleepDisabled(false) {
                 defaults.set(false, forKey: Keys.lidActive)
             } else {
-                notice = Notice(text: "Ayar geri alınamadı! Terminal: sudo pmset -a disablesleep 0", isWarning: true)
+                notice = Notice(text: L("notice.restoreFailed"), isWarning: true)
             }
         }
     }
 
-    private func scheduleExpiry() {
+    private func scheduleExpiry(until fixedEnd: Date? = nil) {
         expiryTimer?.invalidate()
         expiryTimer = nil
-        guard mode != .off, duration != .forever else {
+        defer { persistSelection() }
+        guard mode != .off, fixedEnd != nil || duration != .forever else {
             endDate = nil
             return
         }
-        let end = Date().addingTimeInterval(TimeInterval(duration.rawValue))
+        let end = fixedEnd ?? Date().addingTimeInterval(TimeInterval(duration.rawValue))
         endDate = end
         let timer = Timer(fire: end, interval: 0, repeats: false) { [weak self] _ in
             Task { @MainActor in self?.deactivate(reason: nil) }
@@ -261,22 +273,70 @@ final class AwakeController: ObservableObject {
         expiryTimer = timer
     }
 
+    // MARK: - Remember selection
+
+    private func persistSelection() {
+        guard rememberMode else {
+            defaults.removeObject(forKey: Keys.savedMode)
+            defaults.removeObject(forKey: Keys.savedEnd)
+            return
+        }
+        defaults.set(mode.rawValue, forKey: Keys.savedMode)
+        defaults.set(endDate?.timeIntervalSince1970 ?? 0, forKey: Keys.savedEnd)
+    }
+
+    /// Re-applies the last selection after launch (reboot, login, restart) when
+    /// "Remember selection" is on. Expired timers are not restored; battery and
+    /// heat checks still apply through `select`.
+    private func restoreRememberedMode() {
+        guard rememberMode,
+              let saved = defaults.string(forKey: Keys.savedMode).flatMap(AwakeMode.init(rawValue:)),
+              saved != .off
+        else { return }
+        let endTS = defaults.double(forKey: Keys.savedEnd)
+        if endTS > 0 && endTS <= Date().timeIntervalSince1970 {
+            persistSelection() // mode is .off here
+            return
+        }
+        select(saved)
+        if mode == saved, endTS > 0 {
+            scheduleExpiry(until: Date(timeIntervalSince1970: endTS))
+        }
+    }
+
     // MARK: - Safety
 
     private func safetyBlockReason(for m: AwakeMode) -> String? {
         if batteryThreshold > 0, battery.hasBattery, battery.onBattery, battery.level <= batteryThreshold {
-            return "Pil %\(battery.level) — %\(batteryThreshold) eşiğinin altında, uyanık kalma kapatıldı."
+            return L("notice.lowBattery", pct(battery.level), pct(batteryThreshold))
         }
         if m == .lid, thermalState == .critical {
-            return "Mac çok ısındı — kapak kapalı modu güvenlik için kapatıldı."
+            return L("notice.tooHot")
         }
         return nil
+    }
+
+    /// Battery/heat checks run only while a mode is active; when idle the app has
+    /// no timers at all (0% CPU). Tolerance lets macOS coalesce wake-ups.
+    private func startPolling() {
+        guard pollTimer == nil else { return }
+        let t = Timer(timeInterval: 60, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.poll() }
+        }
+        t.tolerance = 20
+        RunLoop.main.add(t, forMode: .common)
+        pollTimer = t
+    }
+
+    private func stopPolling() {
+        pollTimer?.invalidate()
+        pollTimer = nil
     }
 
     func poll() {
         battery = .current()
         thermalState = ProcessInfo.processInfo.thermalState
-        sleepDisabledInSystem = SleepControl.isSleepDisabled()
+        if mode == .lid { sleepDisabledInSystem = SleepControl.isSleepDisabled() }
         if mode != .off, let reason = safetyBlockReason(for: mode) {
             deactivate(reason: reason)
         }
@@ -289,8 +349,8 @@ final class AwakeController: ObservableObject {
             try SleepControl.install()
             refreshSystemState()
             notice = helperInstalled
-                ? Notice(text: "Kurulum tamam. Artık kapak kapalı modu tek tıkla açılır.", isWarning: false)
-                : Notice(text: "Kural eklendi ama sudo onu kabul etmedi.", isWarning: true)
+                ? Notice(text: L("notice.setupDone"), isWarning: false)
+                : Notice(text: L("notice.setupRejected"), isWarning: true)
         } catch SleepControl.SetupError.cancelled {
             notice = nil
         } catch {
@@ -302,7 +362,7 @@ final class AwakeController: ObservableObject {
         if mode == .lid { deactivate(reason: nil) }
         do {
             try SleepControl.uninstall()
-            notice = Notice(text: "Sudoers kuralı kaldırıldı.", isWarning: false)
+            notice = Notice(text: L("notice.removed"), isWarning: false)
         } catch SleepControl.SetupError.cancelled {
         } catch {
             notice = Notice(text: error.localizedDescription, isWarning: true)
@@ -314,7 +374,7 @@ final class AwakeController: ObservableObject {
         do {
             try LoginItem.set(on)
         } catch {
-            notice = Notice(text: "Giriş öğesi ayarlanamadı: \(error.localizedDescription)", isWarning: true)
+            notice = Notice(text: L("notice.loginFailed", error.localizedDescription), isWarning: true)
         }
         launchAtLogin = LoginItem.isEnabled
         loginItemNote = LoginItem.note
@@ -327,7 +387,7 @@ final class AwakeController: ObservableObject {
         let result = IOPMAssertionCreateWithName(
             kIOPMAssertionTypePreventUserIdleSystemSleep as CFString,
             IOPMAssertionLevel(kIOPMAssertionLevelOn),
-            "LidAwake: kullanıcı uyanık kalmayı seçti" as CFString,
+            "Awake Mac: user chose to stay awake" as CFString,
             &assertionID
         )
         hasAssertion = result == kIOReturnSuccess
@@ -347,7 +407,7 @@ final class AwakeController: ObservableObject {
         center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
             guard granted else { return }
             let content = UNMutableNotificationContent()
-            content.title = "LidAwake"
+            content.title = "Awake Mac"
             content.body = text
             center.add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
         }

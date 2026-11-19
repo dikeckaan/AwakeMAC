@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="Resources/AppIcon.png" width="128" alt="LidAwake ikonu">
+  <img src="Resources/AppIcon.png" width="128" alt="Awake Mac ikonu">
 </p>
 
-<h1 align="center">LidAwake</h1>
+<h1 align="center">Awake Mac</h1>
 
 <p align="center">
   MacBook'unu <b>kapak kapalıyken bile</b> uyanık tutan, menü çubuğundan tek tıkla kontrol edilen küçük, native bir macOS uygulaması.<br>
@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshot.png" width="760" alt="LidAwake açık ve koyu mod">
+  <img src="docs/screenshot.png" width="760" alt="Awake Mac açık ve koyu mod">
 </p>
 
 ## Özellikler
@@ -25,19 +25,25 @@
 - **Pil eşiği:** Pilde çalışırken şarj seçilen eşiğin (varsayılan **%20**) altına inerse otomatik kapatır ve bildirim gönderir.
 - **Isı koruması:** macOS termal durumu *Kritik* olursa kapak kapalı modu kapatılır.
 - **Her zaman geri alır:** Çıkışta, `SIGTERM`/`SIGINT`/`SIGHUP`'ta ve kapatma/yeniden başlatmada `disablesleep 0` yapılır. Uygulama çökse veya zorla öldürülse bile bir sonraki açılışta ayar geri alınır.
+- **Seçimi hatırla:** Kapalıyken seçim tek seferliktir (yeniden başlatınca *Kapalı*). Açıkken seçtiğin mod yeniden başlatma/girişten sonra kalan süresiyle birlikte geri gelir; süresi dolmuşsa gelmez, pil/ısı korumaları yine geçerlidir.
 - **Girişte başlat:** `SMAppService.mainApp` ile; ilk açılışta varsayılan olarak **açık**, ayarlardan kapatılabilir.
 - Dock ikonu yok (`LSUIElement`), açık/koyu mod uyumlu, SF Symbols ile durum ikonu (🌙 kapalı · ☕ hafif · ☀️ kapak kapalı).
 - Başlıktaki `SleepDisabled 1` rozeti doğrudan `pmset -g` çıktısını gösterir — gerçekte ne olduğunu her zaman görürsün.
+- **15 dil:** Türkçe, English, Deutsch, Français, Español, Italiano, Português (BR), Nederlands, Polski, Русский, Українська, 日本語, 한국어, 简体中文, العربية — sistem diline göre otomatik seçilir. Çeviriler tek dosyada: [`scripts/translations.py`](scripts/translations.py).
+- **Hafif:** Boştayken hiçbir zamanlayıcı ve alt süreç çalışmaz (**%0 CPU**, ~75–95 MB bellek). Pil/ısı kontrolü yalnızca bir mod açıkken dakikada bir yapılır.
+
+### Test edildi
+MacBook'ta (macOS 27.2, pilde, harici monitör yok) *Kapak kapalı* modu açıkken kapak 3 dk 13 sn kapalı tutuldu: 5 saniyelik kayıtlarda hiç boşluk olmadı, `pmset -g log`'da uyku kaydı oluşmadı. Uygulamadan çıkınca `SleepDisabled` tekrar `0` oldu.
 
 ## Kurulum
 
 ### Hazır sürüm
-[Releases](../../releases) sayfasından `LidAwake-x.y.z.zip`'i indir, açıp `LidAwake.app`'i **Uygulamalar** klasörüne taşı.
+[Releases](../../releases) sayfasından `AwakeMac-x.y.z.zip`'i indir, açıp `Awake Mac.app`'i **Uygulamalar** klasörüne taşı.
 
 Uygulama ad-hoc imzalı (Apple Developer ID ile noter onaylı değil). İlk açılışta macOS uyarı verirse:
 
 ```bash
-xattr -dr com.apple.quarantine /Applications/LidAwake.app
+xattr -dr com.apple.quarantine "/Applications/Awake Mac.app"
 ```
 
 ya da Finder'da sağ tık → **Aç**.
@@ -48,18 +54,18 @@ Sadece Xcode Command Line Tools yeterli (macOS 13+):
 ```bash
 git clone https://github.com/dikeckaan/AwakeMAC.git
 cd AwakeMAC
-./scripts/build.sh --install   # build/LidAwake.app üretir, /Applications'a kopyalar ve açar
+./scripts/build.sh --install   # "build/Awake Mac.app" üretir, /Applications'a kopyalar ve açar
 ```
 
 Diğer seçenekler: `./scripts/build.sh` (yalnızca derle), `./scripts/build.sh --zip` (`dist/` altına release zip'i).
-Proje bir Swift Package olduğu için `Package.swift` doğrudan Xcode ile de açılabilir; `xcodebuild -scheme LidAwake` de çalışır (Xcode yüklüyse), ancak `.app` paketini `build.sh` oluşturur.
+Proje bir Swift Package olduğu için `Package.swift` doğrudan Xcode ile de açılabilir; `xcodebuild -scheme AwakeMac` de çalışır (Xcode yüklüyse), ancak `.app` paketini `build.sh` oluşturur.
 
 ## Yetki nasıl alınıyor? (güvenlik)
 
-`pmset -a disablesleep` root yetkisi ister. LidAwake bunun için **en dar** yolu kullanır:
+`pmset -a disablesleep` root yetkisi ister. Awake Mac bunun için **en dar** yolu kullanır:
 
-1. Ayarlar'daki **Kur…** düğmesine bastığında macOS'in kendi yönetici penceresi açılır (AppleScript `do shell script … with administrator privileges`). Şifreni **macOS sorar**; LidAwake şifreyi görmez, saklamaz, Anahtar Zinciri'ne yazmaz.
-2. Bu tek seferlik işlem `/etc/sudoers.d/lidawake` dosyasını oluşturur. İçinde yalnızca şu kural vardır:
+1. Ayarlar'daki **Kur…** düğmesine bastığında macOS'in kendi yönetici penceresi açılır (AppleScript `do shell script … with administrator privileges`). Şifreni **macOS sorar**; Awake Mac şifreyi görmez, saklamaz, Anahtar Zinciri'ne yazmaz.
+2. Bu tek seferlik işlem `/etc/sudoers.d/awakemac` dosyasını oluşturur. İçinde yalnızca şu kural vardır:
 
    ```
    <kullanıcı-adın> ALL=(root) NOPASSWD: /usr/bin/pmset -a disablesleep 1, /usr/bin/pmset -a disablesleep 0
@@ -72,7 +78,7 @@ Proje bir Swift Package olduğu için `Package.swift` doğrudan Xcode ile de aç
 **Kaldırmak için:** Ayarlar → Yetki → **Kaldır** ya da:
 
 ```bash
-sudo rm /etc/sudoers.d/lidawake
+sudo rm /etc/sudoers.d/awakemac
 sudo pmset -a disablesleep 0
 ```
 
@@ -87,27 +93,30 @@ sudo pmset -a disablesleep 0
 ## Nasıl çalışıyor?
 
 ```
-Sources/LidAwake/
-├── App.swift              MenuBarExtra + AppDelegate (çıkış/sinyal/kapatmada geri alma)
+Sources/AwakeMac/
+├── App.swift              NSStatusItem + NSPopover, AppDelegate (çıkış/sinyal/kapatmada geri alma)
 ├── AwakeController.swift  Mod, süre, pil/ısı güvenliği, çökme sonrası kurtarma
 ├── SleepControl.swift     pmset + sudoers kurulumu
 ├── PowerInfo.swift        IOKit pil bilgisi, termal durum
 ├── LoginItem.swift        SMAppService.mainApp
 ├── MenuContentView.swift  Arayüz
-└── Snapshot.swift         README görselleri (LidAwake --snapshot <klasör>)
+├── Localization.swift     L(), yerel yüzde/süre biçimleri
+└── Snapshot.swift         README görselleri (AwakeMac --snapshot <klasör>)
 ```
 
 ---
 
 ## English
 
-**LidAwake** is a native SwiftUI `MenuBarExtra` app (no Dock icon) that keeps your Mac awake:
+**Awake Mac** is a native SwiftUI menu bar app (no Dock icon) that keeps your Mac awake:
 
 - **Light** mode — prevents idle system sleep via an IOPM assertion (like `caffeinate -i`); the display may sleep.
 - **Lid closed** mode — runs `pmset -a disablesleep 1`, so the Mac stays awake even with the lid closed, no external display or charger required.
 - Timers (30 min / 1 h / 2 h / indefinite), auto-off below a battery threshold (default 20 %) and on critical thermal state, launch at login via `SMAppService` (on by default).
 - The setting is **always reverted** (`disablesleep 0`) on quit, on SIGTERM/SIGINT/SIGHUP, on shutdown, and on next launch after a crash.
-- **Privileges:** a one-time setup writes `/etc/sudoers.d/lidawake`, allowing *only* `/usr/bin/pmset -a disablesleep 1` and `… 0` without a password. Your password is entered in macOS' own admin prompt and is never seen or stored by the app. The file is validated with `visudo -cf` before being installed.
+- **Privileges:** a one-time setup writes `/etc/sudoers.d/awakemac`, allowing *only* `/usr/bin/pmset -a disablesleep 1` and `… 0` without a password. Your password is entered in macOS' own admin prompt and is never seen or stored by the app. The file is validated with `visudo -cf` before being installed.
+- "Remember selection" (off by default) restores the chosen mode, including the remaining time, after restart/login.
+- Localized into 15 languages; idle CPU usage is 0% (no timers or child processes while off).
 - Build: `./scripts/build.sh --install` (Command Line Tools are enough; macOS 13+).
 
 ## Lisans / License

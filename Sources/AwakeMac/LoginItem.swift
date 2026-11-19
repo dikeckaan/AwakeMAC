@@ -18,7 +18,7 @@ enum LoginItem {
     static var note: String? {
         switch status {
         case .requiresApproval:
-            return "Sistem Ayarları > Genel > Giriş Öğeleri'nden onay gerekiyor."
+            return L("login.approval")
         default:
             return nil
         }

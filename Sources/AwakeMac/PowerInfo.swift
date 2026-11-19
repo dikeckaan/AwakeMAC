@@ -44,24 +44,24 @@ struct BatteryInfo: Equatable {
     }
 
     var label: String {
-        guard hasBattery else { return "Adaptör" }
-        return "%\(level)"
+        guard hasBattery else { return L("battery.adapter") }
+        return pct(level)
     }
 
     var sourceLabel: String {
-        guard hasBattery else { return "Pil yok" }
-        if charging { return "Şarj oluyor" }
-        return onBattery ? "Pilde" : "Adaptörde"
+        guard hasBattery else { return L("battery.none") }
+        if charging { return L("battery.charging") }
+        return onBattery ? L("battery.onBattery") : L("battery.onAC")
     }
 }
 
 extension ProcessInfo.ThermalState {
     var label: String {
         switch self {
-        case .nominal: return "Normal"
-        case .fair: return "Ilık"
-        case .serious: return "Sıcak"
-        case .critical: return "Kritik"
+        case .nominal: return L("thermal.nominal")
+        case .fair: return L("thermal.fair")
+        case .serious: return L("thermal.serious")
+        case .critical: return L("thermal.critical")
         @unknown default: return "?"
         }
     }

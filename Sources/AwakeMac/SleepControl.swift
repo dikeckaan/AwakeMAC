@@ -4,7 +4,7 @@ import Foundation
 /// Talks to `pmset` through a narrowly scoped sudoers rule.
 ///
 /// The rule is installed once (the user authenticates in macOS' own admin
-/// dialog — LidAwake never sees or stores the password) and only allows these
+/// dialog — Awake Mac never sees or stores the password) and only allows these
 /// two exact commands without a password:
 ///
 ///     /usr/bin/pmset -a disablesleep 1
@@ -12,7 +12,9 @@ import Foundation
 enum SleepControl {
     static let pmset = "/usr/bin/pmset"
     static let sudo = "/usr/bin/sudo"
-    static let rulePath = "/etc/sudoers.d/lidawake"
+    static let rulePath = "/etc/sudoers.d/awakemac"
+    /// Rule file name used by pre-release builds (app was called LidAwake).
+    static let legacyRulePath = "/etc/sudoers.d/lidawake"
 
     enum SetupError: LocalizedError {
         case cancelled
@@ -21,9 +23,9 @@ enum SleepControl {
 
         var errorDescription: String? {
             switch self {
-            case .cancelled: return "Kurulum iptal edildi."
-            case .invalidUser: return "Kullanıcı adı beklenmeyen karakterler içeriyor."
-            case .failed(let msg): return "Kurulum başarısız: \(msg)"
+            case .cancelled: return L("error.cancelled")
+            case .invalidUser: return L("error.invalidUser")
+            case .failed(let msg): return L("error.failed", msg)
             }
         }
     }
@@ -53,7 +55,8 @@ enum SleepControl {
 
     /// True if the sudoers rule exists and sudo accepts our command without a password.
     static func isAuthorized() -> Bool {
-        guard FileManager.default.fileExists(atPath: rulePath) else { return false }
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: rulePath) || fm.fileExists(atPath: legacyRulePath) else { return false }
         return run(sudo, ["-n", "-l", pmset, "-a", "disablesleep", "1"]).status == 0
     }
 
@@ -83,12 +86,12 @@ enum SleepControl {
             throw SetupError.invalidUser
         }
         let lines = [
-            "# Installed by LidAwake. Allows ONLY these two commands without a password.",
+            "# Installed by Awake Mac. Allows ONLY these two commands without a password.",
             "# Remove with: sudo rm \(rulePath)",
             "\(user) ALL=(root) NOPASSWD: \(pmset) -a disablesleep 1, \(pmset) -a disablesleep 0",
         ]
         let quoted = lines.map { "'\($0)'" }.joined(separator: " ")
-        let tmp = "/etc/sudoers.d/.lidawake.new" // dotfiles are ignored by sudo's includedir
+        let tmp = "/etc/sudoers.d/.awakemac.new" // dotfiles are ignored by sudo's includedir
         let script = [
             "umask 0337",
             "/usr/bin/printf '%s\\n' \(quoted) > \(tmp)",
@@ -96,15 +99,16 @@ enum SleepControl {
             "/bin/chmod 0440 \(tmp)",
             "/usr/sbin/visudo -cf \(tmp) >/dev/null",
             "/bin/mv -f \(tmp) \(rulePath)",
+            "/bin/rm -f \(legacyRulePath)",
         ].joined(separator: " && ") + " || { /bin/rm -f \(tmp); exit 1; }"
 
-        try runAsAdmin(script, prompt: "LidAwake, kapak kapalıyken uyanık kalabilmek için yalnızca 'pmset -a disablesleep 0/1' komutlarına izin veren bir kural eklemek istiyor.")
+        try runAsAdmin(script, prompt: L("prompt.install"))
     }
 
     static func uninstall() throws {
         setSleepDisabled(false)
-        try runAsAdmin("/usr/bin/pmset -a disablesleep 0; /bin/rm -f \(rulePath)",
-                       prompt: "LidAwake, eklediği sudoers kuralını kaldırmak istiyor.")
+        try runAsAdmin("/usr/bin/pmset -a disablesleep 0; /bin/rm -f \(rulePath) \(legacyRulePath)",
+                       prompt: L("prompt.remove"))
     }
 
     private static func runAsAdmin(_ shell: String, prompt: String) throws {
@@ -117,7 +121,7 @@ enum SleepControl {
         apple.executeAndReturnError(&err)
         if let err {
             if (err[NSAppleScript.errorNumber] as? Int) == -128 { throw SetupError.cancelled }
-            throw SetupError.failed(err[NSAppleScript.errorMessage] as? String ?? "bilinmeyen hata")
+            throw SetupError.failed(err[NSAppleScript.errorMessage] as? String ?? "unknown error")
         }
     }
 }

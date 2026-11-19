@@ -21,8 +21,8 @@ struct MenuContentView: View {
             }
 
             VStack(alignment: .leading, spacing: 6) {
-                SectionLabel(text: "Süre")
-                Picker("Süre", selection: $c.duration) {
+                SectionLabel(text: L("section.duration"))
+                Picker(L("section.duration"), selection: $c.duration) {
                     ForEach(AwakeDuration.allCases) { Text($0.title).tag($0) }
                 }
                 .pickerStyle(.segmented)
@@ -42,7 +42,9 @@ struct MenuContentView: View {
 
             FooterBar()
         }
-        .padding(16)
+        .padding(.horizontal, 16)
+        .padding(.top, 12)
+        .padding(.bottom, 14)
         .frame(width: 340)
         .animation(.easeOut(duration: 0.18), value: c.notice)
         .animation(.easeOut(duration: 0.18), value: ui.value)
@@ -68,7 +70,7 @@ private struct HeaderView: View {
             }
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
-                    Text("LidAwake")
+                    Text("Awake Mac")
                         .font(.system(size: 15, weight: .bold, design: .rounded))
                     if c.sleepDisabledInSystem {
                         Text("SleepDisabled 1")
@@ -77,13 +79,14 @@ private struct HeaderView: View {
                             .padding(.vertical, 2)
                             .background(Capsule().fill(AwakeMode.lid.colors[0].opacity(0.16)))
                             .foregroundStyle(AwakeMode.lid.colors[0])
-                            .help("pmset -g çıktısında SleepDisabled = 1")
+                            .help(L("badge.help"))
                     }
                 }
                 statusLine
                     .font(.system(size: 11.5))
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
         }
@@ -92,14 +95,14 @@ private struct HeaderView: View {
     private var statusLine: Text {
         let prefix: String
         switch c.mode {
-        case .off: return Text("Mac normal şekilde uyur")
-        case .light: prefix = "Sistem uyumaz"
-        case .lid: prefix = "Kapak kapalıyken de uyanık"
+        case .off: return Text(L("status.off"))
+        case .light: prefix = L("status.light")
+        case .lid: prefix = L("status.lid")
         }
         if let end = c.endDate {
             return Text("\(prefix) · ") + Text(end, style: .timer).monospacedDigit()
         }
-        return Text("\(prefix) · süresiz")
+        return Text("\(prefix) · \(L("status.indefinite"))")
     }
 }
 
@@ -157,13 +160,13 @@ private struct SetupCard: View {
                 .font(.system(size: 18))
                 .foregroundStyle(AwakeMode.lid.colors[0])
             VStack(alignment: .leading, spacing: 6) {
-                Text("Tek seferlik kurulum")
+                Text(L("setup.title"))
                     .font(.system(size: 12, weight: .semibold))
-                Text("Kapak kapalı modu için yalnızca `pmset -a disablesleep 0/1` komutlarına izin veren dar bir sudoers kuralı eklenir. Şifren macOS'in kendi penceresinde sorulur, uygulama saklamaz.")
+                Text(L("setup.body"))
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                Button("Kur…") { c.installHelper() }
+                Button(L("setup.install")) { c.installHelper() }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
             }
@@ -182,10 +185,10 @@ private struct StatusStrip: View {
         HStack(spacing: 8) {
             Chip(symbol: c.battery.symbol, title: c.battery.label, subtitle: c.battery.sourceLabel,
                  tint: batteryTint)
-            Chip(symbol: c.thermalState.symbol, title: c.thermalState.label, subtitle: "Isı",
+            Chip(symbol: c.thermalState.symbol, title: c.thermalState.label, subtitle: L("chip.heat"),
                  tint: thermalTint)
-            Chip(symbol: "shield.lefthalf.filled", title: c.batteryThreshold == 0 ? "Kapalı" : "%\(c.batteryThreshold)",
-                 subtitle: "Pil eşiği", tint: .secondary)
+            Chip(symbol: "shield.lefthalf.filled", title: c.batteryThreshold == 0 ? L("settings.off") : pct(c.batteryThreshold),
+                 subtitle: L("chip.threshold"), tint: .secondary)
         }
     }
 
@@ -219,7 +222,9 @@ private struct Chip: View {
                 .frame(width: 18)
             VStack(alignment: .leading, spacing: 0) {
                 Text(title).font(.system(size: 11.5, weight: .semibold)).monospacedDigit()
+                    .lineLimit(1).minimumScaleFactor(0.75)
                 Text(subtitle).font(.system(size: 9.5)).foregroundStyle(.secondary)
+                    .lineLimit(1).minimumScaleFactor(0.75)
             }
             Spacer(minLength: 0)
         }
@@ -268,7 +273,7 @@ private struct SettingsSection: View {
                 expanded.toggle()
             } label: {
                 HStack {
-                    SectionLabel(text: "Ayarlar")
+                    SectionLabel(text: L("section.settings"))
                     Spacer()
                     Image(systemName: "chevron.right")
                         .font(.system(size: 10, weight: .bold))
@@ -281,7 +286,7 @@ private struct SettingsSection: View {
 
             if expanded {
                 VStack(alignment: .leading, spacing: 10) {
-                    SettingRow(symbol: "power", title: "Girişte başlat") {
+                    SettingRow(symbol: "power", title: L("settings.launchAtLogin")) {
                         Toggle("", isOn: Binding(get: { c.launchAtLogin }, set: { c.setLaunchAtLogin($0) }))
                             .toggleStyle(.switch)
                             .controlSize(.small)
@@ -291,10 +296,24 @@ private struct SettingsSection: View {
                         Text(note).font(.system(size: 10.5)).foregroundStyle(.orange)
                     }
 
-                    SettingRow(symbol: "battery.25", title: "Pil eşiğinde kapat") {
+                    VStack(alignment: .leading, spacing: 3) {
+                        SettingRow(symbol: "pin", title: L("settings.remember")) {
+                            Toggle("", isOn: $c.rememberMode)
+                                .toggleStyle(.switch)
+                                .controlSize(.small)
+                                .labelsHidden()
+                        }
+                        Text(L(c.rememberMode ? "settings.remember.on" : "settings.remember.off"))
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.leading, 26)
+                    }
+
+                    SettingRow(symbol: "battery.25", title: L("settings.threshold")) {
                         Picker("", selection: $c.batteryThreshold) {
                             ForEach(AwakeController.thresholdChoices, id: \.self) { v in
-                                Text(v == 0 ? "Kapalı" : "%\(v)").tag(v)
+                                Text(v == 0 ? L("settings.off") : pct(v)).tag(v)
                             }
                         }
                         .pickerStyle(.menu)
@@ -302,17 +321,20 @@ private struct SettingsSection: View {
                         .fixedSize()
                     }
 
-                    SettingRow(symbol: "lock.shield", title: "Yetki (sudoers)") {
+                    SettingRow(symbol: "lock.shield", title: L("settings.privilege")) {
                         if c.helperInstalled {
                             HStack(spacing: 8) {
-                                Label("Kurulu", systemImage: "checkmark.seal.fill")
+                                Label(L("setup.installed"), systemImage: "checkmark.seal.fill")
                                     .font(.system(size: 11, weight: .medium))
                                     .foregroundStyle(.green)
-                                Button("Kaldır") { c.uninstallHelper() }
+                                    .lineLimit(1)
+                                    .fixedSize()
+                                Button(L("setup.remove")) { c.uninstallHelper() }
                                     .controlSize(.small)
+                                    .fixedSize()
                             }
                         } else {
-                            Button("Kur…") { c.installHelper() }
+                            Button(L("setup.install")) { c.installHelper() }
                                 .controlSize(.small)
                         }
                     }
@@ -335,7 +357,8 @@ private struct SettingRow<Trailing: View>: View {
                 .foregroundStyle(.secondary)
                 .frame(width: 18)
             Text(title).font(.system(size: 12))
-            Spacer()
+                .lineLimit(1).minimumScaleFactor(0.8)
+            Spacer(minLength: 6)
             trailing
         }
         .frame(minHeight: 22)
@@ -345,7 +368,7 @@ private struct SettingRow<Trailing: View>: View {
 private struct SectionLabel: View {
     let text: String
     var body: some View {
-        Text(text.uppercased(with: Locale(identifier: "tr_TR")))
+        Text(text.uppercased(with: Locale.current))
             .font(.system(size: 10, weight: .semibold))
             .tracking(0.6)
             .foregroundStyle(.secondary)
@@ -362,13 +385,13 @@ private struct FooterBar: View {
             Button {
                 NSApp.terminate(nil)
             } label: {
-                Label("Çıkış", systemImage: "power")
+                Label(L("quit"), systemImage: "power")
                     .font(.system(size: 11.5, weight: .medium))
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
             .keyboardShortcut("q")
-            .help("Çıkarken uyku ayarı her zaman geri alınır")
+            .help(L("quit.help"))
         }
     }
 }

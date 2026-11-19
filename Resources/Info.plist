@@ -3,25 +3,25 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
-	<string>tr</string>
+	<string>en</string>
+	<key>CFBundleDisplayName</key>
+	<string>Awake Mac</string>
 	<key>CFBundleExecutable</key>
-	<string>LidAwake</string>
+	<string>AwakeMac</string>
 	<key>CFBundleIconFile</key>
 	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
-	<string>app.lidawake.LidAwake</string>
+	<string>app.awakemac.AwakeMac</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>LidAwake</string>
-	<key>CFBundleDisplayName</key>
-	<string>LidAwake</string>
+	<string>Awake Mac</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0.0</string>
+	<string>1.1.0</string>
 	<key>CFBundleVersion</key>
-	<string>1</string>
+	<string>2</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.utilities</string>
 	<key>LSMinimumSystemVersion</key>

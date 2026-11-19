@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// `LidAwake --snapshot <dir>` renders the popover in light and dark mode to PNGs
+/// `AwakeMac --snapshot <dir>` renders the popover in light and dark mode to PNGs
 /// for the README. It never touches pmset or login items.
 @MainActor
 enum Snapshot {
