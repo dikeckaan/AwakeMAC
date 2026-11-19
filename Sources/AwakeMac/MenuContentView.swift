@@ -33,7 +33,6 @@ struct MenuContentView: View {
 
             if let n = c.notice {
                 NoticeBanner(notice: n) { c.notice = nil }
-                    .transition(.opacity.combined(with: .move(edge: .top)))
             }
 
             Divider().opacity(0.6)
@@ -46,8 +45,6 @@ struct MenuContentView: View {
         .padding(.top, 12)
         .padding(.bottom, 14)
         .frame(width: 340)
-        .animation(.easeOut(duration: 0.18), value: c.notice)
-        .animation(.easeOut(duration: 0.18), value: ui.value)
         .onAppear { if !forceSettingsOpen { c.refreshSystemState() } }
     }
 }
@@ -279,6 +276,7 @@ private struct SettingsSection: View {
                         .font(.system(size: 10, weight: .bold))
                         .foregroundStyle(.secondary)
                         .rotationEffect(.degrees(expanded ? 90 : 0))
+                        .animation(.easeOut(duration: 0.15), value: expanded)
                 }
                 .contentShape(Rectangle())
             }
@@ -339,7 +337,6 @@ private struct SettingsSection: View {
                         }
                     }
                 }
-                .transition(.opacity)
             }
         }
     }

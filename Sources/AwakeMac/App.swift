@@ -23,7 +23,13 @@ final class StatusBarController: NSObject {
     init(controller: AwakeController) {
         self.controller = controller
         super.init()
-        let host = NSHostingController(rootView: MenuContentView().environmentObject(controller))
+        let host = NSHostingController(
+            rootView: MenuContentView()
+                .environmentObject(controller)
+                // Keep content pinned to the top while the popover resizes, so new
+                // sections appear at the bottom instead of the panel redrawing from the middle.
+                .frame(maxHeight: .infinity, alignment: .top)
+        )
         host.sizingOptions = [.preferredContentSize]
         popover.contentViewController = host
         popover.behavior = .transient
