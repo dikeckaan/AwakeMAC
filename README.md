@@ -21,16 +21,23 @@
 | **Hafif** | Boşta uykuyu engeller, ekran kapanabilir. Kapak kapanırsa Mac **uyur**. | `IOPMAssertion` (`caffeinate -i` ile aynı) |
 | **Kapak kapalı** | Kapak kapalıyken, harici monitör ya da şarj olmadan bile uyumaz. | `pmset -a disablesleep 1` |
 
-- **Süre:** 30 dk · 1 sa · 2 sa · Süresiz — süre dolunca otomatik kapanır.
+- **Süre:** 30 dk · 1 sa · 2 sa · Süresiz; `⋯` menüsünden 15 dk, 3/4/8 sa, **belirli saate kadar** ve **+30 dk uzat**. Süre dolunca otomatik kapanır.
 - **Pil eşiği:** Pilde çalışırken şarj seçilen eşiğin (varsayılan **%20**) altına inerse otomatik kapatır ve bildirim gönderir.
-- **Isı koruması:** macOS termal durumu *Kritik* olursa kapak kapalı modu kapatılır.
+- **Isı koruması:** *Sıcak* seviyesinde bildirim gelir; *Kritik* olursa kapak kapalı modu kapatılır.
+- **Kapak kapanınca ekranı kilitle** (varsayılan açık): Mac uyumadığı için normalde kilitlenmezdi; kapağı açan biri doğrudan masaüstünü görmesin diye anında kilitlenir.
+- **Yalnızca şarjdayken** seçeneği: kapak kapalı mod adaptör takılı değilse açılmaz, kablo çıkınca anında kapanır.
+- **Bitmeden 5 dk önce** "+30 dk" düğmeli bildirim.
 - **Her zaman geri alır:** Çıkışta, `SIGTERM`/`SIGINT`/`SIGHUP`'ta ve kapatma/yeniden başlatmada `disablesleep 0` yapılır. Uygulama çökse veya zorla öldürülse bile bir sonraki açılışta ayar geri alınır.
 - **Seçimi hatırla:** Kapalıyken seçim tek seferliktir (yeniden başlatınca *Kapalı*). Açıkken seçtiğin mod yeniden başlatma/girişten sonra kalan süresiyle birlikte geri gelir; süresi dolmuşsa gelmez, pil/ısı korumaları yine geçerlidir.
 - **Girişte başlat:** `SMAppService.mainApp` ile; ilk açılışta varsayılan olarak **açık**, ayarlardan kapatılabilir.
+- **Akıllı tetikleyiciler:** seçilen uygulamalar açıkken, belirli komutlar (ffmpeg, rsync, xcodebuild…) çalışırken, indirme/yükleme sürerken, şarj adaptörü veya harici ekran bağlıyken ve her gün belirli saatlerde (ör. 01:00–07:00) otomatik uyanık kalır; koşul bitince kapanır. Elle seçim her zaman önceliklidir.
+- **Hızlı kullanım:** global kısayol **⌥⌘A**, menü ikonuna **sağ tık** ile hızlı menü, menü çubuğunda **kalan süre**, isteğe bağlı **ekranı da açık tut**.
+- **Otomasyon:** `awakemac://lid?minutes=60`, `awakemac://light`, `awakemac://toggle`, `awakemac://off` adresleri ve **Kısayollar (Shortcuts)** eylemleri.
+- **Güncelleme denetimi:** GitHub Releases günde bir kez kontrol edilir (kapatılabilir).
 - Dock ikonu yok (`LSUIElement`), açık/koyu mod uyumlu, SF Symbols ile durum ikonu (🌙 kapalı · ☕ hafif · ☀️ kapak kapalı).
 - Başlıktaki `SleepDisabled 1` rozeti doğrudan `pmset -g` çıktısını gösterir — gerçekte ne olduğunu her zaman görürsün.
 - **15 dil:** Türkçe, English, Deutsch, Français, Español, Italiano, Português (BR), Nederlands, Polski, Русский, Українська, 日本語, 한국어, 简体中文, العربية — sistem diline göre otomatik seçilir. Çeviriler tek dosyada: [`scripts/translations.py`](scripts/translations.py).
-- **Hafif:** Boştayken hiçbir zamanlayıcı ve alt süreç çalışmaz (**%0 CPU**, ~75–95 MB bellek). Pil/ısı kontrolü yalnızca bir mod açıkken dakikada bir yapılır.
+- **Hafif:** Tamamen olay güdümlü — pil, şarj, ısı, kapak ve uygulama değişiklikleri macOS bildirimleriyle gelir; boştayken zamanlayıcı ya da alt süreç yok (**%0 CPU**, ~80–95 MB bellek). Komut/ağ tetikleyicisi seçiliyse yalnızca 30 sn'de bir örnekleme yapılır.
 
 ### Test edildi
 MacBook'ta (macOS 27.2, pilde, harici monitör yok) *Kapak kapalı* modu açıkken kapak 3 dk 13 sn kapalı tutuldu: 5 saniyelik kayıtlarda hiç boşluk olmadı, `pmset -g log`'da uyku kaydı oluşmadı. Uygulamadan çıkınca `SleepDisabled` tekrar `0` oldu.
@@ -40,16 +47,16 @@ MacBook'ta (macOS 27.2, pilde, harici monitör yok) *Kapak kapalı* modu açıkk
 ### Hazır sürüm
 [Releases](../../releases) sayfasından `AwakeMac-x.y.z.zip`'i indir, açıp `Awake Mac.app`'i **Uygulamalar** klasörüne taşı.
 
-Uygulama ad-hoc imzalı (Apple Developer ID ile noter onaylı değil). İlk açılışta macOS uyarı verirse:
+1.2.0'dan itibaren sürümler **Developer ID ile imzalı ve Apple tarafından noter onaylıdır** — uyarısız açılır.
+
+Homebrew ile:
 
 ```bash
-xattr -dr com.apple.quarantine "/Applications/Awake Mac.app"
+brew install --cask dikeckaan/tap/awake-mac
 ```
 
-ya da Finder'da sağ tık → **Aç**.
-
 ### Kaynaktan derleme
-Sadece Xcode Command Line Tools yeterli (macOS 13+):
+Hızlı yerel derleme için Command Line Tools yeterli (macOS 13+):
 
 ```bash
 git clone https://github.com/dikeckaan/AwakeMAC.git
@@ -57,8 +64,10 @@ cd AwakeMAC
 ./scripts/build.sh --install   # "build/Awake Mac.app" üretir, /Applications'a kopyalar ve açar
 ```
 
-Diğer seçenekler: `./scripts/build.sh` (yalnızca derle), `./scripts/build.sh --zip` (`dist/` altına release zip'i).
-Proje bir Swift Package olduğu için `Package.swift` doğrudan Xcode ile de açılabilir; `xcodebuild -scheme AwakeMac` de çalışır (Xcode yüklüyse), ancak `.app` paketini `build.sh` oluşturur.
+- `swift test` — birim testleri (zaman penceresi, sürüm karşılaştırma, URL komutları, 15 dilin eksiksiz ve biçim olarak güvenli olduğu).
+- `AwakeMac.xcodeproj` — Xcode ile aç, çalıştır ya da arşivle.
+- `TEAM_ID=XXXXXXXXXX ./scripts/release.sh --publish` — Xcode'da giriş yapılmış hesapla **Developer ID imzası + noter onayı + staple**, ardından GitHub release (şifre gerekmez).
+- Çeviriler: [`scripts/translations.py`](scripts/translations.py) ve [`scripts/strings_more.py`](scripts/strings_more.py) → `python3 scripts/translations.py`.
 
 ## Yetki nasıl alınıyor? (güvenlik)
 
@@ -90,18 +99,25 @@ sudo pmset -a disablesleep 0
 - Pilde uzun süre kullanacaksan pil eşiğini açık tut.
 - Elle kontrol: `pmset -g | grep SleepDisabled` (satır yoksa ya da `0` ise uyku normal).
 
+## App Store?
+
+Bu sürüm App Store'a konamaz: App Store uygulamaları sandbox içinde çalışmak zorunda ve root yetkisi (`pmset`, sudoers) istemek yasak (App Review 2.4.5). Kapak kapalı mod, ekran kilitleme (özel API) ve uygulama içi güncelleme bu yüzden mağaza dışında kalır. Hafif mod, süreler, tetikleyiciler ve kısayollar ise sandbox içinde de çalışabilir — ileride ayrı bir "Lite" sürüm olarak düşünülebilir.
+
 ## Nasıl çalışıyor?
 
 ```
 Sources/AwakeMac/
-├── App.swift              NSStatusItem + NSPopover, AppDelegate (çıkış/sinyal/kapatmada geri alma)
-├── AwakeController.swift  Mod, süre, pil/ısı güvenliği, çökme sonrası kurtarma
+├── App.swift              NSStatusItem + NSPopover, sağ tık menüsü, ⌥⌘A, URL şeması, AppDelegate
+├── AwakeController.swift  Modlar, süre, güvenlik, tetikleyici entegrasyonu, bildirimler, çökme kurtarma
+├── Triggers.swift         Uygulama/komut/ağ/şarj/ekran/zamanlama tetikleyicileri, güncelleme denetimi
+├── SystemMonitors.swift   IOKit güç/kapak olayları, ekran kilidi, Carbon kısayol, süreç ve ağ sayaçları
 ├── SleepControl.swift     pmset + sudoers kurulumu
-├── PowerInfo.swift        IOKit pil bilgisi, termal durum
-├── LoginItem.swift        SMAppService.mainApp
-├── MenuContentView.swift  Arayüz
-├── Localization.swift     L(), yerel yüzde/süre biçimleri
-└── Snapshot.swift         README görselleri (AwakeMac --snapshot <klasör>)
+├── Prefs.swift            Tüm ayarlar (UserDefaults)
+├── Logic.swift            Saf mantık (zaman penceresi, sürüm, URL) — birim testli
+├── PopoverView.swift      Menü çubuğu paneli
+├── SettingsView.swift     Sekmeli Ayarlar penceresi ve ilk açılış ekranı
+├── Intents.swift          Kısayollar (App Intents)
+├── PowerInfo.swift · LoginItem.swift · Localization.swift · Snapshot.swift
 ```
 
 ---
@@ -112,12 +128,14 @@ Sources/AwakeMac/
 
 - **Light** mode — prevents idle system sleep via an IOPM assertion (like `caffeinate -i`); the display may sleep.
 - **Lid closed** mode — runs `pmset -a disablesleep 1`, so the Mac stays awake even with the lid closed, no external display or charger required.
-- Timers (30 min / 1 h / 2 h / indefinite), auto-off below a battery threshold (default 20 %) and on critical thermal state, launch at login via `SMAppService` (on by default).
+- Timers (30 min / 1 h / 2 h / indefinite, custom, until a time, +30 min), auto-off below a battery threshold (default 20 %) and on critical thermal state, heat warnings, optional "lid mode only on power adapter", **screen lock when the lid closes**, a 5-minute warning with a "+30 min" action, launch at login via `SMAppService`.
+- **Triggers:** stay awake automatically while chosen apps or commands run, during network transfers, on power adapter, with an external display, or on a daily schedule.
+- Global shortcut ⌥⌘A, right-click quick menu, remaining time in the menu bar, `awakemac://` URLs and Shortcuts actions, update check via GitHub Releases.
 - The setting is **always reverted** (`disablesleep 0`) on quit, on SIGTERM/SIGINT/SIGHUP, on shutdown, and on next launch after a crash.
 - **Privileges:** a one-time setup writes `/etc/sudoers.d/awakemac`, allowing *only* `/usr/bin/pmset -a disablesleep 1` and `… 0` without a password. Your password is entered in macOS' own admin prompt and is never seen or stored by the app. The file is validated with `visudo -cf` before being installed.
 - "Remember selection" (off by default) restores the chosen mode, including the remaining time, after restart/login.
 - Localized into 15 languages; idle CPU usage is 0% (no timers or child processes while off).
-- Build: `./scripts/build.sh --install` (Command Line Tools are enough; macOS 13+).
+- Releases are Developer ID signed and notarized. Build: `./scripts/build.sh --install`; signed release: `TEAM_ID=… ./scripts/release.sh`; tests: `swift test`.
 
 ## Lisans / License
 

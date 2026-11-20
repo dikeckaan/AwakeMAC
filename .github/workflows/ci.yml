@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app && xcodebuild -version
+      - name: Unit tests (SwiftPM)
+        run: swift test
+      - name: Xcode build (unsigned)
+        run: |
+          xcodebuild -project AwakeMac.xcodeproj -scheme AwakeMac -configuration Release \
+            -derivedDataPath build/xc CODE_SIGNING_ALLOWED=NO build
+      - name: Translations are generated
+        run: |
+          python3 scripts/translations.py
+          git diff --exit-code App/
+      - name: Upload unsigned app
+        uses: actions/upload-artifact@v4
+        with:
+          name: AwakeMac-unsigned
+          path: build/xc/Build/Products/Release/Awake Mac.app

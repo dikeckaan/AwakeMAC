@@ -13,7 +13,7 @@ enum Snapshot {
 
         var images: [NSImage] = []
         for (name, appearance) in [("light", NSAppearance.Name.aqua), ("dark", NSAppearance.Name.darkAqua)] {
-            let root = MenuContentView(forceSettingsOpen: true)
+            let root = MenuContentView()
                 .environmentObject(c)
                 .background(Color(nsColor: .windowBackgroundColor))
             let host = NSHostingView(rootView: root)

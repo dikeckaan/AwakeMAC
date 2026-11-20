@@ -629,8 +629,27 @@ def esc(s):
     return s.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
 
 
+def merge_more():
+    """Fold the per-key rows of strings_more.py into KEYS/T."""
+    import sys
+    sys.path.insert(0, os.path.dirname(__file__))
+    import strings_more as M
+    for k in M.REMOVED:
+        if k in KEYS:
+            KEYS.remove(k)
+        for t in T.values():
+            t.pop(k, None)
+    for key, row in M.S.items():
+        assert len(row) == len(M.LANGS), (key, len(row))
+        if key not in KEYS:
+            KEYS.append(key)
+        for lang, value in zip(M.LANGS, row):
+            T[lang][key] = value
+
+
 def main():
-    root = os.path.join(os.path.dirname(__file__), "..", "Resources", "Localization")
+    merge_more()
+    root = os.path.join(os.path.dirname(__file__), "..", "App")
     en = T["en"]
     assert set(en) == set(KEYS), set(en) ^ set(KEYS)
     for lang, table in T.items():

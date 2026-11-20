@@ -74,19 +74,21 @@ final class AwakeController: ObservableObject {
     static let shared = AwakeController()
 
     private enum Keys {
-        static let duration = "duration"
-        static let threshold = "batteryThreshold"
         static let lidActive = "lidModeActive" // crash-recovery marker
         static let loginConfigured = "loginItemConfigured"
-        static let remember = "rememberMode"
         static let savedMode = "savedMode"
         static let savedEnd = "savedEnd" // seconds since 1970, 0 = no time limit
     }
 
-    static let thresholdChoices = [0, 10, 15, 20, 30, 40]
+    nonisolated static let expiryCategory = "AWAKE_EXPIRY"
+    nonisolated static let extendAction = "EXTEND_30"
+
+    let prefs = Prefs.shared
 
     @Published private(set) var mode: AwakeMode = .off
     @Published private(set) var endDate: Date?
+    /// Non-nil while the current mode was switched on by an automatic trigger.
+    @Published private(set) var autoReason: String?
     @Published private(set) var helperInstalled = false
     @Published private(set) var sleepDisabledInSystem = false
     @Published private(set) var battery = BatteryInfo.current()
@@ -95,41 +97,19 @@ final class AwakeController: ObservableObject {
     @Published private(set) var loginItemNote: String?
     @Published var notice: Notice?
 
-    @Published var duration: AwakeDuration {
-        didSet {
-            UserDefaults.standard.set(duration.rawValue, forKey: Keys.duration)
-            if mode != .off { scheduleExpiry() }
-        }
-    }
-
-    /// When on, the selected mode survives app restarts, logouts and reboots.
-    @Published var rememberMode: Bool {
-        didSet {
-            UserDefaults.standard.set(rememberMode, forKey: Keys.remember)
-            persistSelection()
-        }
-    }
-
-    @Published var batteryThreshold: Int {
-        didSet {
-            UserDefaults.standard.set(batteryThreshold, forKey: Keys.threshold)
-            poll()
-        }
-    }
-
-    private var assertionID: IOPMAssertionID = 0
-    private var hasAssertion = false
+    private var idleAssertion: IOPMAssertionID = 0
+    private var displayAssertion: IOPMAssertionID = 0
+    private var hasIdleAssertion = false
+    private var hasDisplayAssertion = false
     private var expiryTimer: Timer?
-    private var pollTimer: Timer?
     private var bootstrapped = false
+    private var autoSuppressed = false // user turned an auto session off; wait for conditions to clear
+    private var heatWarned = false
+    private var cancellables: Set<AnyCancellable> = []
     private let defaults = UserDefaults.standard
-
-    init() {
-        defaults.register(defaults: [Keys.duration: AwakeDuration.forever.rawValue, Keys.threshold: 20])
-        duration = AwakeDuration(rawValue: defaults.integer(forKey: Keys.duration)) ?? .forever
-        batteryThreshold = defaults.integer(forKey: Keys.threshold)
-        rememberMode = defaults.bool(forKey: Keys.remember)
-    }
+    private let powerObserver = PowerSourceObserver()
+    private let clamshell = ClamshellMonitor()
+    let triggers = TriggerMonitor()
 
     // MARK: - Lifecycle
 
@@ -137,8 +117,7 @@ final class AwakeController: ObservableObject {
         guard !bootstrapped else { return }
         bootstrapped = true
 
-        // If a previous run crashed or was force-killed while lid mode was on,
-        // undo it now so the Mac does not stay sleepless forever.
+        // A previous run crashed or was force-killed while lid mode was on: undo it.
         if defaults.bool(forKey: Keys.lidActive) {
             if SleepControl.setSleepDisabled(false) {
                 notice = Notice(text: L("notice.recovered"), isWarning: false)
@@ -152,13 +131,42 @@ final class AwakeController: ObservableObject {
         }
 
         refreshSystemState()
-        restoreRememberedMode()
+        setUpNotifications()
 
+        // Everything below is event driven — no polling while idle.
+        powerObserver.start { [weak self] in
+            Task { @MainActor in self?.powerChanged() }
+        }
         NotificationCenter.default.addObserver(
             forName: ProcessInfo.thermalStateDidChangeNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in self?.poll() }
+            Task { @MainActor in self?.checkSafety() }
         }
+        clamshell.start { [weak self] closed in
+            Task { @MainActor in self?.lidChanged(closed: closed) }
+        }
+        prefs.$keepDisplayOn.dropFirst().sink { [weak self] _ in
+            DispatchQueue.main.async { self?.applyAssertions() }
+        }.store(in: &cancellables)
+        prefs.$rememberMode.dropFirst().sink { [weak self] _ in
+            DispatchQueue.main.async { self?.persistSelection() }
+        }.store(in: &cancellables)
+        prefs.$batteryThreshold.dropFirst().sink { [weak self] _ in
+            DispatchQueue.main.async { self?.checkSafety() }
+        }.store(in: &cancellables)
+        prefs.$lidOnlyOnAC.dropFirst().sink { [weak self] _ in
+            DispatchQueue.main.async { self?.checkSafety() }
+        }.store(in: &cancellables)
+        prefs.$duration.dropFirst().sink { [weak self] d in
+            DispatchQueue.main.async {
+                guard let self, self.mode != .off, self.autoReason == nil else { return }
+                self.scheduleExpiry(until: d == .forever ? nil : Date().addingTimeInterval(TimeInterval(d.rawValue)))
+            }
+        }.store(in: &cancellables)
+
+        restoreRememberedMode()
+        triggers.start { [weak self] reason in self?.triggerChanged(reason) }
+        UpdateChecker.shared.start()
     }
 
     func refreshSystemState() {
@@ -173,67 +181,112 @@ final class AwakeController: ObservableObject {
     /// Synchronous, actor-independent restore used on quit, logout and signals.
     nonisolated static func restoreSystemDefaults() {
         let d = UserDefaults.standard
-        if d.bool(forKey: Keys.lidActive) {
-            if SleepControl.setSleepDisabled(false) {
-                d.set(false, forKey: Keys.lidActive)
-            }
+        if d.bool(forKey: Keys.lidActive), SleepControl.setSleepDisabled(false) {
+            d.set(false, forKey: Keys.lidActive)
         }
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: ["expiry"])
         // IOPM assertions are released automatically when the process exits.
     }
 
-    // MARK: - Mode switching
+    // MARK: - Public actions
 
-    func select(_ newMode: AwakeMode) {
+    /// Manual selection from the UI, menu, hot key, URL or Shortcuts.
+    func select(_ newMode: AwakeMode, minutes: Int? = nil) {
         notice = nil
-        guard newMode != mode else { return }
-
         if newMode == .off {
+            if autoReason != nil { autoSuppressed = true }
             deactivate(reason: nil)
             return
         }
+        let end: Date?
+        if let minutes { end = Date().addingTimeInterval(TimeInterval(minutes * 60)) }
+        else if prefs.duration == .forever { end = nil }
+        else { end = Date().addingTimeInterval(TimeInterval(prefs.duration.rawValue)) }
+
+        if activate(newMode, until: end) {
+            autoReason = nil
+            prefs.lastMode = newMode
+            persistSelection()
+        }
+    }
+
+    func toggle() {
+        if mode == .off {
+            let preferred = prefs.lastMode == .off ? AwakeMode.light : prefs.lastMode
+            select(preferred == .lid && !helperInstalled ? .light : preferred)
+        } else {
+            select(.off)
+        }
+    }
+
+    /// Custom end time for the current (or last used) mode.
+    func keepAwake(until end: Date) {
+        guard end > Date() else { return }
+        if mode == .off {
+            let m = prefs.lastMode == .off ? AwakeMode.light : prefs.lastMode
+            if activate(m == .lid && !helperInstalled ? .light : m, until: end) { autoReason = nil }
+        } else {
+            autoReason = nil
+            scheduleExpiry(until: end)
+        }
+        persistSelection()
+    }
+
+    func extend(by seconds: TimeInterval) {
+        guard mode != .off else { return }
+        let base = max(endDate ?? Date(), Date())
+        scheduleExpiry(until: base.addingTimeInterval(seconds))
+    }
+
+    func handle(_ command: URLCommand) {
+        switch command {
+        case .off: select(.off)
+        case .toggle: toggle()
+        case .mode(let m, let minutes): select(m, minutes: minutes)
+        }
+    }
+
+    // MARK: - Activation core
+
+    @discardableResult
+    private func activate(_ newMode: AwakeMode, until end: Date?) -> Bool {
         if newMode == .lid && !helperInstalled {
             refreshSystemState()
             if !helperInstalled {
                 notice = Notice(text: L("notice.setupFirst"), isWarning: true)
-                return
+                return false
             }
         }
         if let reason = safetyBlockReason(for: newMode) {
             notice = Notice(text: reason, isWarning: true)
-            return
+            return false
         }
 
-        teardown()
-
-        switch newMode {
-        case .light:
-            guard createAssertion() else {
-                notice = Notice(text: L("notice.assertionFailed"), isWarning: true)
-                return
-            }
-        case .lid:
-            defaults.set(true, forKey: Keys.lidActive) // set before, so a crash mid-way still recovers
-            guard SleepControl.setSleepDisabled(true) else {
-                defaults.set(false, forKey: Keys.lidActive)
+        if mode == .lid && newMode != .lid { setLid(false) }
+        if newMode == .lid && mode != .lid {
+            guard setLid(true) else {
                 refreshSystemState()
                 notice = Notice(text: L("notice.pmsetFailed"), isWarning: true)
-                return
+                return false
             }
-            _ = createAssertion() // also keep idle-sleep off; harmless and helps on AC
-        case .off:
-            break
         }
-
         mode = newMode
-        scheduleExpiry()
-        startPolling()
+        heatWarned = false
+        applyAssertions()
+        scheduleExpiry(until: end)
         sleepDisabledInSystem = SleepControl.isSleepDisabled()
+        return true
     }
 
     private func deactivate(reason: String?) {
-        teardown()
-        stopPolling()
+        expiryTimer?.invalidate()
+        expiryTimer = nil
+        endDate = nil
+        cancelExpiryWarning()
+        if mode == .lid || defaults.bool(forKey: Keys.lidActive) { setLid(false) }
         mode = .off
+        autoReason = nil
+        applyAssertions()
         persistSelection()
         sleepDisabledInSystem = SleepControl.isSleepDisabled()
         if let reason {
@@ -242,73 +295,111 @@ final class AwakeController: ObservableObject {
         }
     }
 
-    private func teardown() {
-        expiryTimer?.invalidate()
-        expiryTimer = nil
-        endDate = nil
-        releaseAssertion()
-        if mode == .lid || defaults.bool(forKey: Keys.lidActive) {
-            if SleepControl.setSleepDisabled(false) {
+    @discardableResult
+    private func setLid(_ on: Bool) -> Bool {
+        if on {
+            defaults.set(true, forKey: Keys.lidActive) // before the command: a crash mid-way still recovers
+            guard SleepControl.setSleepDisabled(true) else {
                 defaults.set(false, forKey: Keys.lidActive)
-            } else {
-                notice = Notice(text: L("notice.restoreFailed"), isWarning: true)
+                return false
             }
+            return true
         }
+        if SleepControl.setSleepDisabled(false) {
+            defaults.set(false, forKey: Keys.lidActive)
+            return true
+        }
+        notice = Notice(text: L("notice.restoreFailed"), isWarning: true)
+        return false
     }
 
-    private func scheduleExpiry(until fixedEnd: Date? = nil) {
+    private func scheduleExpiry(until end: Date?) {
         expiryTimer?.invalidate()
         expiryTimer = nil
-        defer { persistSelection() }
-        guard mode != .off, fixedEnd != nil || duration != .forever else {
-            endDate = nil
-            return
-        }
-        let end = fixedEnd ?? Date().addingTimeInterval(TimeInterval(duration.rawValue))
         endDate = end
+        cancelExpiryWarning()
+        defer { persistSelection() }
+        guard mode != .off, let end else { return }
         let timer = Timer(fire: end, interval: 0, repeats: false) { [weak self] _ in
             Task { @MainActor in self?.deactivate(reason: nil) }
         }
         RunLoop.main.add(timer, forMode: .common)
         expiryTimer = timer
+        scheduleExpiryWarning(end)
+    }
+
+    private func applyAssertions() {
+        let active = mode != .off
+        setAssertion(&idleAssertion, &hasIdleAssertion, on: active,
+                     type: kIOPMAssertionTypePreventUserIdleSystemSleep as CFString)
+        setAssertion(&displayAssertion, &hasDisplayAssertion, on: active && prefs.keepDisplayOn,
+                     type: kIOPMAssertionTypePreventUserIdleDisplaySleep as CFString)
+    }
+
+    private func setAssertion(_ id: inout IOPMAssertionID, _ has: inout Bool, on: Bool, type: CFString) {
+        if on && !has {
+            has = IOPMAssertionCreateWithName(type, IOPMAssertionLevel(kIOPMAssertionLevelOn),
+                                              "Awake Mac: user chose to stay awake" as CFString, &id) == kIOReturnSuccess
+        } else if !on && has {
+            IOPMAssertionRelease(id)
+            has = false
+        }
+    }
+
+    // MARK: - Triggers
+
+    private func triggerChanged(_ reason: String?) {
+        guard let reason else {
+            autoSuppressed = false
+            if autoReason != nil { deactivate(reason: nil) }
+            return
+        }
+        if autoReason != nil {
+            autoReason = reason // still automatic, maybe a different cause
+            return
+        }
+        guard mode == .off, !autoSuppressed else { return }
+        let m = prefs.triggerMode == .lid && !helperInstalled ? AwakeMode.light : prefs.triggerMode
+        if activate(m, until: nil) { autoReason = reason }
     }
 
     // MARK: - Remember selection
 
     private func persistSelection() {
-        guard rememberMode else {
+        guard prefs.rememberMode else {
             defaults.removeObject(forKey: Keys.savedMode)
             defaults.removeObject(forKey: Keys.savedEnd)
             return
         }
+        guard autoReason == nil else { return } // automatic sessions are not "selections"
         defaults.set(mode.rawValue, forKey: Keys.savedMode)
         defaults.set(endDate?.timeIntervalSince1970 ?? 0, forKey: Keys.savedEnd)
     }
 
-    /// Re-applies the last selection after launch (reboot, login, restart) when
-    /// "Remember selection" is on. Expired timers are not restored; battery and
-    /// heat checks still apply through `select`.
+    /// Re-applies the last manual selection after launch when "Remember selection" is on.
+    /// Expired timers are not restored; safety checks still apply.
     private func restoreRememberedMode() {
-        guard rememberMode,
+        guard prefs.rememberMode,
               let saved = defaults.string(forKey: Keys.savedMode).flatMap(AwakeMode.init(rawValue:)),
               saved != .off
         else { return }
         let endTS = defaults.double(forKey: Keys.savedEnd)
         if endTS > 0 && endTS <= Date().timeIntervalSince1970 {
-            persistSelection() // mode is .off here
+            persistSelection()
             return
         }
-        select(saved)
-        if mode == saved, endTS > 0 {
-            scheduleExpiry(until: Date(timeIntervalSince1970: endTS))
-        }
+        activate(saved, until: endTS > 0 ? Date(timeIntervalSince1970: endTS) : nil)
     }
 
     // MARK: - Safety
 
     private func safetyBlockReason(for m: AwakeMode) -> String? {
-        if batteryThreshold > 0, battery.hasBattery, battery.onBattery, battery.level <= batteryThreshold {
-            return L("notice.lowBattery", pct(battery.level), pct(batteryThreshold))
+        let t = prefs.batteryThreshold
+        if t > 0, battery.hasBattery, battery.onBattery, battery.level <= t {
+            return L("notice.lowBattery", pct(battery.level), pct(t))
+        }
+        if m == .lid, prefs.lidOnlyOnAC, battery.hasBattery, battery.onBattery {
+            return L("notice.lidNeedsAC")
         }
         if m == .lid, thermalState == .critical {
             return L("notice.tooHot")
@@ -316,30 +407,34 @@ final class AwakeController: ObservableObject {
         return nil
     }
 
-    /// Battery/heat checks run only while a mode is active; when idle the app has
-    /// no timers at all (0% CPU). Tolerance lets macOS coalesce wake-ups.
-    private func startPolling() {
-        guard pollTimer == nil else { return }
-        let t = Timer(timeInterval: 60, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.poll() }
-        }
-        t.tolerance = 20
-        RunLoop.main.add(t, forMode: .common)
-        pollTimer = t
+    private func powerChanged() {
+        checkSafety()
+        triggers.evaluate()
     }
 
-    private func stopPolling() {
-        pollTimer?.invalidate()
-        pollTimer = nil
-    }
-
-    func poll() {
+    func checkSafety() {
         battery = .current()
         thermalState = ProcessInfo.processInfo.thermalState
         if mode == .lid { sleepDisabledInSystem = SleepControl.isSleepDisabled() }
-        if mode != .off, let reason = safetyBlockReason(for: mode) {
+        guard mode != .off else { return }
+        if let reason = safetyBlockReason(for: mode) {
+            if autoReason != nil { autoSuppressed = true }
             deactivate(reason: reason)
+            return
         }
+        if prefs.heatWarning, thermalState.rawValue >= ProcessInfo.ThermalState.serious.rawValue {
+            if !heatWarned {
+                heatWarned = true
+                postNotification(L("notice.hot"))
+            }
+        } else if thermalState.rawValue <= ProcessInfo.ThermalState.fair.rawValue {
+            heatWarned = false
+        }
+    }
+
+    private func lidChanged(closed: Bool) {
+        guard closed, mode == .lid, prefs.lockOnLidClose else { return }
+        ScreenLock.lock()
     }
 
     // MARK: - Setup / settings
@@ -380,43 +475,43 @@ final class AwakeController: ObservableObject {
         loginItemNote = LoginItem.note
     }
 
-    // MARK: - IOPM assertion
-
-    private func createAssertion() -> Bool {
-        guard !hasAssertion else { return true }
-        let result = IOPMAssertionCreateWithName(
-            kIOPMAssertionTypePreventUserIdleSystemSleep as CFString,
-            IOPMAssertionLevel(kIOPMAssertionLevelOn),
-            "Awake Mac: user chose to stay awake" as CFString,
-            &assertionID
-        )
-        hasAssertion = result == kIOReturnSuccess
-        return hasAssertion
-    }
-
-    private func releaseAssertion() {
-        guard hasAssertion else { return }
-        IOPMAssertionRelease(assertionID)
-        hasAssertion = false
-    }
-
     // MARK: - Notifications
 
-    private func postNotification(_ text: String) {
+    private func setUpNotifications() {
         let center = UNUserNotificationCenter.current()
-        center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
-            guard granted else { return }
-            let content = UNMutableNotificationContent()
-            content.title = "Awake Mac"
-            content.body = text
-            center.add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
-        }
+        center.delegate = NotificationHandler.shared
+        let extend = UNNotificationAction(identifier: Self.extendAction, title: L("notify.extend30"), options: [])
+        center.setNotificationCategories([
+            UNNotificationCategory(identifier: Self.expiryCategory, actions: [extend], intentIdentifiers: [], options: []),
+        ])
+        center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
+    }
+
+    private func scheduleExpiryWarning(_ end: Date) {
+        let lead = end.timeIntervalSinceNow - 300
+        guard prefs.expiryWarning, lead > 60 else { return }
+        let content = UNMutableNotificationContent()
+        content.title = "Awake Mac"
+        content.body = L("notify.expiring")
+        content.categoryIdentifier = Self.expiryCategory
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: lead, repeats: false)
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "expiry", content: content, trigger: trigger))
+    }
+
+    private func cancelExpiryWarning() {
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: ["expiry"])
+    }
+
+    private func postNotification(_ text: String) {
+        let content = UNMutableNotificationContent()
+        content.title = "Awake Mac"
+        content.body = text
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
     }
 
     // MARK: - Preview (used by --snapshot only)
 
     func applyPreview(mode: AwakeMode, remaining: TimeInterval, battery: BatteryInfo) {
-        self.duration = .h2
         self.mode = mode
         self.endDate = Date().addingTimeInterval(remaining)
         self.battery = battery
@@ -424,5 +519,22 @@ final class AwakeController: ObservableObject {
         self.sleepDisabledInSystem = mode == .lid
         self.launchAtLogin = true
         self.thermalState = .nominal
+    }
+}
+
+final class NotificationHandler: NSObject, UNUserNotificationCenterDelegate {
+    static let shared = NotificationHandler()
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
+                                withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler([.banner, .sound])
+    }
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
+                                withCompletionHandler completionHandler: @escaping () -> Void) {
+        if response.actionIdentifier == AwakeController.extendAction {
+            DispatchQueue.main.async { AwakeController.shared.extend(by: 1800) }
+        }
+        completionHandler()
     }
 }

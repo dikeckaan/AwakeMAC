@@ -12,6 +12,11 @@ let package = Package(
                 .linkedFramework("IOKit"),
                 .linkedFramework("ServiceManagement"),
             ]
-        )
+        ),
+        .testTarget(
+            name: "AwakeMacTests",
+            dependencies: ["AwakeMac"],
+            path: "Tests/AwakeMacTests"
+        ),
     ]
 )
