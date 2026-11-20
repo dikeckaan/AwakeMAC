@@ -66,7 +66,7 @@ cd AwakeMAC
 
 - `swift test` — birim testleri (zaman penceresi, sürüm karşılaştırma, URL komutları, 15 dilin eksiksiz ve biçim olarak güvenli olduğu).
 - `AwakeMac.xcodeproj` — Xcode ile aç, çalıştır ya da arşivle.
-- `TEAM_ID=XXXXXXXXXX ./scripts/release.sh --publish` — Xcode'da giriş yapılmış hesapla **Developer ID imzası + noter onayı + staple**, ardından GitHub release (şifre gerekmez).
+- `./scripts/release.sh --publish` — Xcode'da giriş yapılmış hesapla **Developer ID imzası + noter onayı + staple**, ardından GitHub release (şifre gerekmez).
 - Çeviriler: [`scripts/translations.py`](scripts/translations.py) ve [`scripts/strings_more.py`](scripts/strings_more.py) → `python3 scripts/translations.py`.
 
 ## Yetki nasıl alınıyor? (güvenlik)
@@ -135,7 +135,7 @@ Sources/AwakeMac/
 - **Privileges:** a one-time setup writes `/etc/sudoers.d/awakemac`, allowing *only* `/usr/bin/pmset -a disablesleep 1` and `… 0` without a password. Your password is entered in macOS' own admin prompt and is never seen or stored by the app. The file is validated with `visudo -cf` before being installed.
 - "Remember selection" (off by default) restores the chosen mode, including the remaining time, after restart/login.
 - Localized into 15 languages; idle CPU usage is 0% (no timers or child processes while off).
-- Releases are Developer ID signed and notarized. Build: `./scripts/build.sh --install`; signed release: `TEAM_ID=… ./scripts/release.sh`; tests: `swift test`.
+- Releases are Developer ID signed and notarized. Build: `./scripts/build.sh --install`; signed release: `./scripts/release.sh`; tests: `swift test`.
 
 ## Lisans / License
 

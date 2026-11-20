@@ -2,11 +2,11 @@
 # Signed (Developer ID) + notarized + stapled release, using the Apple account
 # that is signed in to Xcode (Xcode › Settings › Accounts). No passwords here.
 #
-#   TEAM_ID=ABCDE12345 ./scripts/release.sh            -> dist/AwakeMac-<version>.zip
-#   TEAM_ID=ABCDE12345 ./scripts/release.sh --publish  -> also creates the GitHub release
+#   ./scripts/release.sh            -> dist/AwakeMac-<version>.zip
+#   ./scripts/release.sh --publish  -> also creates the GitHub release
 set -euo pipefail
 cd "$(dirname "$0")/.."
-: "${TEAM_ID:?Set TEAM_ID to your Apple Developer Team ID}"
+TEAM_ID=${TEAM_ID:-AQ2Y664A4Z} # public identifier, embedded in every signed build
 export DEVELOPER_DIR=${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}
 
 VERSION=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' Config/Info.plist)
