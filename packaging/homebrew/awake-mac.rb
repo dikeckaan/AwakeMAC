@@ -12,7 +12,7 @@ cask "awake-mac" do
     strategy :github_latest
   end
 
-  depends_on macos: ">= :ventura"
+  depends_on macos: :ventura
 
   app "Awake Mac.app"
 
