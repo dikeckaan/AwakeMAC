@@ -52,7 +52,9 @@ MacBook'ta (macOS 27.2, pilde, harici monitör yok) *Kapak kapalı* modu açıkk
 Homebrew ile:
 
 ```bash
-brew install --cask dikeckaan/tap/awake-mac
+brew tap dikeckaan/tap
+brew trust dikeckaan/tap   # yeni Homebrew sürümleri üçüncü parti tap'ler için ister
+brew install --cask awake-mac
 ```
 
 ### Kaynaktan derleme
